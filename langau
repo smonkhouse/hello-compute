@@ -1,0 +1,393 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { CheckCircle, XCircle, RotateCcw, Star } from 'lucide-react';
+
+const LanguageLearningApp = () => {
+  const initialPhrases = [
+    { id: 1, english: "Hello", spanish: "hola", category: "Greetings" },
+    { id: 2, english: "Thank you", spanish: "gracias", category: "Politeness" },
+    { id: 3, english: "Excuse me", spanish: "disculpe", category: "Politeness" },
+    { id: 4, english: "Where is the bathroom?", spanish: "donde esta el bano", category: "Directions" },
+    { id: 5, english: "How much does it cost?", spanish: "cuanto cuesta", category: "Shopping" },
+    { id: 6, english: "I don't speak Spanish", spanish: "no hablo espanol", category: "Communication" },
+    { id: 7, english: "Do you speak English?", spanish: "habla ingles", category: "Communication" },
+    { id: 8, english: "Where is the hotel?", spanish: "donde esta el hotel", category: "Directions" },
+    { id: 9, english: "I would like water", spanish: "quisiera agua", category: "Food & Drink" },
+    { id: 10, english: "The bill, please", spanish: "la cuenta por favor", category: "Food & Drink" },
+    { id: 11, english: "Help!", spanish: "ayuda", category: "Emergency" },
+    { id: 12, english: "Good morning", spanish: "buenos dias", category: "Greetings" },
+    { id: 13, english: "Good night", spanish: "buenas noches", category: "Greetings" },
+    { id: 14, english: "Please", spanish: "por favor", category: "Politeness" },
+    { id: 15, english: "I'm sorry", spanish: "lo siento", category: "Politeness" }
+  ];
+
+  const inputRef = useRef(null);
+  
+  const [phrases, setPhrases] = useState(() => 
+    initialPhrases.map(phrase => ({
+      ...phrase,
+      correctCount: 0,
+      totalAttempts: 0,
+      lastSeen: null,
+      priority: 1
+    }))
+  );
+
+  const [currentPhrase, setCurrentPhrase] = useState(null);
+  const [userAnswer, setUserAnswer] = useState('');
+  const [showResult, setShowResult] = useState(false);
+  const [isCorrect, setIsCorrect] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [totalQuestions, setTotalQuestions] = useState(0);
+
+  const calculateMastery = () => {
+    const totalMastered = phrases.filter(p => 
+      p.totalAttempts >= 3 && (p.correctCount / p.totalAttempts) >= 0.97
+    ).length;
+    return Math.round((totalMastered / phrases.length) * 100);
+  };
+
+  const selectNextPhrase = () => {
+    const now = Date.now();
+    
+    const needsPractice = phrases.filter(p => {
+      const accuracy = p.totalAttempts > 0 ? p.correctCount / p.totalAttempts : 0;
+      return accuracy < 0.97 || p.totalAttempts < 3;
+    });
+
+    if (needsPractice.length === 0) {
+      return phrases[Math.floor(Math.random() * phrases.length)];
+    }
+
+    const weightedPhrases = needsPractice.map(phrase => {
+      const accuracy = phrase.totalAttempts > 0 ? phrase.correctCount / phrase.totalAttempts : 0;
+      const timeSinceLastSeen = phrase.lastSeen ? (now - phrase.lastSeen) / (1000 * 60) : 1000;
+      
+      const accuracyWeight = Math.max(0.1, 1 - accuracy);
+      const timeWeight = Math.min(5, timeSinceLastSeen / 10);
+      
+      return {
+        ...phrase,
+        weight: accuracyWeight * timeWeight * phrase.priority
+      };
+    });
+
+    const totalWeight = weightedPhrases.reduce((sum, p) => sum + p.weight, 0);
+    let random = Math.random() * totalWeight;
+    
+    for (const phrase of weightedPhrases) {
+      random -= phrase.weight;
+      if (random <= 0) {
+        return phrase;
+      }
+    }
+    
+    return weightedPhrases[0];
+  };
+
+  const speakText = (text, lang = 'es') => {
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = lang === 'es' ? 'es-ES' : 'en-US';
+      utterance.rate = 0.8;
+      speechSynthesis.speak(utterance);
+    }
+  };
+
+  const checkAnswer = () => {
+    const correct = userAnswer.toLowerCase().trim() === currentPhrase.spanish.toLowerCase().trim();
+    
+    setIsCorrect(correct);
+    setShowResult(true);
+    setTotalQuestions(prev => prev + 1);
+
+    // Speak the correct answer
+    speakText(currentPhrase.spanish, 'es');
+
+    setPhrases(prev => prev.map(p => {
+      if (p.id === currentPhrase.id) {
+        const newCorrectCount = p.correctCount + (correct ? 1 : 0);
+        const newTotalAttempts = p.totalAttempts + 1;
+        const newPriority = correct ? Math.max(0.5, p.priority * 0.9) : Math.min(3, p.priority * 1.5);
+        
+        return {
+          ...p,
+          correctCount: newCorrectCount,
+          totalAttempts: newTotalAttempts,
+          lastSeen: Date.now(),
+          priority: newPriority
+        };
+      }
+      return p;
+    }));
+
+    if (correct) {
+      setStreak(prev => prev + 1);
+      // Auto advance to next question after 1 second if correct
+      setTimeout(() => {
+        nextQuestion();
+      }, 1000);
+    } else {
+      setStreak(0);
+      // Stay on wrong answers - require manual next
+    }
+  };
+
+  const nextQuestion = () => {
+    setCurrentPhrase(selectNextPhrase());
+    setUserAnswer('');
+    setShowResult(false);
+    setIsCorrect(false);
+    
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    }, 10);
+  };
+
+  const resetProgress = () => {
+    setPhrases(prev => prev.map(p => ({
+      ...p,
+      correctCount: 0,
+      totalAttempts: 0,
+      lastSeen: null,
+      priority: 1
+    })));
+    setStreak(0);
+    setTotalQuestions(0);
+    nextQuestion();
+  };
+
+  useEffect(() => {
+    if (!currentPhrase) {
+      setCurrentPhrase(selectNextPhrase());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (inputRef.current && !showResult) {
+      inputRef.current.focus();
+    }
+  }, [currentPhrase, showResult]);
+
+  const masteryPercentage = calculateMastery();
+  const averageAccuracy = phrases.reduce((sum, p) => {
+    return sum + (p.totalAttempts > 0 ? p.correctCount / p.totalAttempts : 0);
+  }, 0) / phrases.length * 100;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-indigo-800 mb-2">LinguaLearn</h1>
+          <p className="text-gray-600">Master Spanish through adaptive repetition</p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            <div>
+              <div className="text-2xl font-bold text-green-600">{masteryPercentage}%</div>
+              <div className="text-sm text-gray-500">Mastery</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-blue-600">{Math.round(averageAccuracy)}%</div>
+              <div className="text-sm text-gray-500">Avg Accuracy</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-orange-600">{streak}</div>
+              <div className="text-sm text-gray-500">Streak</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-purple-600">{totalQuestions}</div>
+              <div className="text-sm text-gray-500">Total Q's</div>
+            </div>
+          </div>
+          
+          <div className="mt-4">
+            <div className="flex justify-between text-sm text-gray-600 mb-1">
+              <span>Progress to 97% mastery</span>
+              <span>{masteryPercentage}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-3">
+              <div 
+                className="bg-gradient-to-r from-green-400 to-green-600 h-3 rounded-full transition-all duration-300"
+                style={{ width: `${masteryPercentage}%` }}
+              ></div>
+            </div>
+          </div>
+        </div>
+
+        {currentPhrase && (
+          <div className="bg-white rounded-xl shadow-lg p-8 mb-6" 
+               onKeyDown={(e) => {
+                 if (e.key === 'Enter') {
+                   e.preventDefault();
+                   if (showResult) {
+                     nextQuestion();
+                   } else if (userAnswer.trim()) {
+                     checkAnswer();
+                   }
+                 }
+               }}
+               tabIndex="-1">
+            <div className="text-center mb-6">
+              <div className="text-sm text-gray-500 mb-2">{currentPhrase.category}</div>
+              <h2 className="text-3xl font-semibold text-gray-800 mb-6">
+                {currentPhrase.english}
+              </h2>
+              
+              <div className="text-sm text-gray-400 mb-4">
+                NO PUNCTUATION REQUIRED - Press Enter to continue
+              </div>
+              
+              <input
+                ref={inputRef}
+                type="text"
+                value={userAnswer}
+                onChange={(e) => setUserAnswer(e.target.value)}
+                className="w-full text-xl p-4 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none text-center"
+                placeholder="Type your answer..."
+                disabled={showResult}
+                autoFocus
+              />
+            </div>
+
+            {showResult && (
+              <div className={`text-center p-6 rounded-lg mb-6 ${
+                isCorrect ? 'bg-green-100 border-2 border-green-300' : 'bg-red-100 border-2 border-red-300'
+              }`}>
+                <div className="mb-4">
+                  {isCorrect ? (
+                    <div className="flex items-center justify-center">
+                      <CheckCircle className="w-12 h-12 text-green-600 mr-3" />
+                      <span className="text-3xl font-bold text-green-800">CORRECT!</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center">
+                      <XCircle className="w-12 h-12 text-red-600 mr-3" />
+                      <span className="text-3xl font-bold text-red-800">WRONG!</span>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="text-xl font-semibold text-gray-800 mb-3">
+                  <button
+                    onClick={() => speakText(currentPhrase.spanish, 'es')}
+                    className="text-indigo-700 hover:text-indigo-900 underline cursor-pointer"
+                  >
+                    🔊 {currentPhrase.spanish}
+                  </button>
+                </div>
+                
+                {!isCorrect && (
+                  <div className="text-base text-red-600 mb-3 font-medium">
+                    This phrase will appear more frequently until mastered
+                  </div>
+                )}
+                
+                {isCorrect ? (
+                  <div className="text-lg text-green-700 font-bold">
+                    Auto-advancing in 1 second...
+                  </div>
+                ) : (
+                  <div>
+                    <div className="text-lg text-red-700 font-bold mb-3">
+                      ↩ Press Enter or click Next to continue
+                    </div>
+                    
+                    <button
+                      onClick={nextQuestion}
+                      className="bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                    >
+                      Next Question
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!showResult && (
+              <div className="flex justify-center">
+                <button
+                  onClick={checkAnswer}
+                  className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+                  disabled={!userAnswer.trim()}
+                >
+                  Check Answer
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="bg-white rounded-xl shadow-lg p-6">
+          <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+            <Star className="w-5 h-5 text-yellow-500 mr-2" />
+            Learning Progress
+          </h3>
+          
+          <div className="grid gap-2 max-h-64 overflow-y-auto">
+            {phrases
+              .sort((a, b) => {
+                const aAccuracy = a.totalAttempts > 0 ? a.correctCount / a.totalAttempts : 0;
+                const bAccuracy = b.totalAttempts > 0 ? b.correctCount / b.totalAttempts : 0;
+                return aAccuracy - bAccuracy;
+              })
+              .map(phrase => {
+                const accuracy = phrase.totalAttempts > 0 ? 
+                  Math.round((phrase.correctCount / phrase.totalAttempts) * 100) : 0;
+                const isMastered = phrase.totalAttempts >= 3 && accuracy >= 97;
+                
+                return (
+                  <div 
+                    key={phrase.id} 
+                    className={`flex justify-between items-center p-3 rounded-lg border ${
+                      isMastered ? 'bg-green-50 border-green-200' : 
+                      accuracy < 50 && phrase.totalAttempts > 0 ? 'bg-red-50 border-red-200' :
+                      'bg-gray-50 border-gray-200'
+                    }`}
+                  >
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-800">{phrase.english}</div>
+                      <div className="text-sm text-gray-600">{phrase.spanish}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className={`font-semibold ${
+                        isMastered ? 'text-green-600' :
+                        accuracy < 50 && phrase.totalAttempts > 0 ? 'text-red-600' :
+                        'text-gray-600'
+                      }`}>
+                        {phrase.totalAttempts > 0 ? `${accuracy}%` : 'New'}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {phrase.totalAttempts > 0 ? `${phrase.correctCount}/${phrase.totalAttempts}` : 'Not attempted'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <button
+              onClick={resetProgress}
+              className="flex items-center justify-center w-full py-2 text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Reset Progress
+            </button>
+          </div>
+        </div>
+
+        {masteryPercentage >= 97 && (
+          <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white rounded-xl p-6 mt-6 text-center">
+            <h2 className="text-2xl font-bold mb-2">🎉 Congratulations! 🎉</h2>
+            <p className="text-lg">You've achieved 97% mastery of basic tourist Spanish!</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default LanguageLearningApp;
