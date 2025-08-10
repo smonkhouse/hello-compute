@@ -7,12 +7,18 @@ language = "javascript"
 manifest_version = 3
 name = "Hello Compute"
 
+[setup]
+  [setup.backends]
+    [setup.backends.app]
+      description = "The static backend for the app"
+      address = "127.0.0.1"
+      port = 8000
+
 [local_server]
-
-  [local_server.backends]
-
-    [local_server.backends.website]
-      url = "http://localhost:3000/"
+  [local_server.static_dirs]
+    [local_server.static_dirs.app]
+      prefix = "/"
+      directory = "dist"
 
 [scripts]
   build = "npm run build"
